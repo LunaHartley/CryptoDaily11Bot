@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
@@ -16,7 +17,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- Constants for Public Data Sources (No API Keys Required) ---
+# --- Constants for Public Data Sources ---
 COINGECKO_API = "https://api.coingecko.com/api/v3"
 COINGECKO_PRICE = f"{COINGECKO_API}/simple/price"
 COINGECKO_TRENDING = f"{COINGECKO_API}/search/trending"
@@ -72,7 +73,7 @@ async def get_top_news():
     """Get a daily news digest."""
     trending = await get_trending_coins()
     news_items = [
-        f"📰 *Today's Crypto Highlights*\n",
+        f"📰 *Today's Crypto Highlights*",
         f"🚀 *Trending Coins*: {trending}",
         f"💡 *Did you know?* Bitcoin's whitepaper was published on October 31, 2008.",
         f"📅 *Today's Date*: {datetime.now().strftime('%B %d, %Y')}",
@@ -151,7 +152,11 @@ async def trending(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Main Application ---
 
 def main():
-    """Start the bot - SYNC version to avoid event loop issues."""
+    """Start the bot using a clean event loop."""
+    # Create a new event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
     # Create the Application
     application = Application.builder().token(BOT_TOKEN).build()
 
@@ -162,13 +167,12 @@ def main():
     application.add_handler(CommandHandler("price", price))
     application.add_handler(CommandHandler("trending", trending))
 
-    # Clear any webhook
-    import asyncio
-    asyncio.run(application.bot.delete_webhook())
-
-    # Start the Bot using the sync method
+    # Run the bot
     print("🤖 CryptoDaily Bot is starting...")
-    application.run_polling()
+    try:
+        application.run_polling()
+    finally:
+        loop.close()
 
 if __name__ == "__main__":
     main()
