@@ -1,12 +1,10 @@
 import os
-import asyncio
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 import aiohttp
-import json
 
 # Load environment variables
 load_dotenv()
@@ -19,14 +17,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- Constants for Public Data Sources (No API Keys Required) ---
-
-# CoinGecko API endpoints (free, no key needed for public data)
 COINGECKO_API = "https://api.coingecko.com/api/v3"
-COINGECKO_PING = f"{COINGECKO_API}/ping"
 COINGECKO_PRICE = f"{COINGECKO_API}/simple/price"
 COINGECKO_TRENDING = f"{COINGECKO_API}/search/trending"
-
-# Alternative: Binance public API
 BINANCE_API = "https://api.binance.com/api/v3"
 BINANCE_24H_TICKER = f"{BINANCE_API}/ticker/24hr"
 
@@ -34,40 +27,17 @@ BINANCE_24H_TICKER = f"{BINANCE_API}/ticker/24hr"
 
 async def get_bitcoin_price():
     """Fetch current BTC price in USD from CoinGecko."""
-    params = {
-        "ids": "bitcoin",
-        "vs_currencies": "usd"
-    }
+    params = {"ids": "bitcoin", "vs_currencies": "usd"}
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(COINGECKO_PRICE, params=params) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return data.get("bitcoin", {}).get("usd", "N/A")
-                else:
-                    logger.error(f"Price API Error: {resp.status}")
-                    return None
+                return None
         except Exception as e:
             logger.error(f"Price request failed: {e}")
             return None
-
-async def get_top_news():
-    """
-    Fetch top crypto news headlines from a free, public API.
-    Using a simple RSS-to-JSON proxy, or a public NewsAPI endpoint.
-    """
-    # Using a free, public RSS feed aggregator (no key required)
-    # For demonstration, we'll use a static list of trending coins and a daily fact.
-    # In a production version, you can integrate with a public RSS feed.
-    trending = await get_trending_coins()
-    news_items = [
-        f"📰 *Today's Crypto Highlights*\n",
-        f"🚀 *Trending Coins*: {trending}",
-        f"💡 *Did you know?* Bitcoin's whitepaper was published on October 31, 2008.",
-        f"📅 *Today's Date*: {datetime.now().strftime('%B %d, %Y')}",
-        f"\n🔗 For more news, visit your favorite crypto news site."
-    ]
-    return "\n".join(news_items)
 
 async def get_trending_coins():
     """Get top trending coins from CoinGecko."""
@@ -79,16 +49,13 @@ async def get_trending_coins():
                     coins = data.get("coins", [])[:5]
                     names = [coin["item"]["name"] for coin in coins]
                     return ", ".join(names) if names else "Bitcoin, Ethereum, Solana"
-                else:
-                    return "Bitcoin, Ethereum, Solana"
+                return "Bitcoin, Ethereum, Solana"
         except Exception:
             return "Bitcoin, Ethereum, Solana"
 
 async def get_market_update():
     """Get a market summary from Binance public API."""
-    params = {
-        "symbol": "BTCUSDT"
-    }
+    params = {"symbol": "BTCUSDT"}
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(BINANCE_24H_TICKER, params=params) as resp:
@@ -97,14 +64,24 @@ async def get_market_update():
                     price = float(data.get("lastPrice", 0))
                     change = float(data.get("priceChangePercent", 0))
                     return f"💰 *BTC/USDT*: ${price:,.2f} (24h: {change:+.2f}%)"
-                else:
-                    return "💰 BTC/USDT: Market data currently unavailable."
+                return "💰 BTC/USDT: Market data currently unavailable."
         except Exception:
             return "💰 BTC/USDT: Market data currently unavailable."
 
+async def get_top_news():
+    """Get a daily news digest."""
+    trending = await get_trending_coins()
+    news_items = [
+        f"📰 *Today's Crypto Highlights*\n",
+        f"🚀 *Trending Coins*: {trending}",
+        f"💡 *Did you know?* Bitcoin's whitepaper was published on October 31, 2008.",
+        f"📅 *Today's Date*: {datetime.now().strftime('%B %d, %Y')}",
+    ]
+    return "\n".join(news_items)
+
 # --- Bot Command Handlers ---
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a welcome message when /start is issued."""
     user = update.effective_user
     welcome_text = (
@@ -121,7 +98,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a help message."""
     help_text = (
         "🤖 *CryptoDaily Bot Help*\n\n"
@@ -136,11 +113,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
 
-async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a daily digest of crypto news and prices."""
     await update.message.reply_text("📊 *Generating your daily crypto digest...*", parse_mode="Markdown")
     
-    # Gather data
     btc_price = await get_bitcoin_price()
     market_update = await get_market_update()
     news = await get_top_news()
@@ -154,7 +130,7 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
     await update.message.reply_text(digest, parse_mode="Markdown")
 
-async def price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send the current BTC price."""
     await update.message.reply_text("⏳ *Fetching current BTC price...*", parse_mode="Markdown")
     btc_price = await get_bitcoin_price()
@@ -163,7 +139,7 @@ async def price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         await update.message.reply_text("❌ Could not fetch BTC price at this time. Please try again later.")
 
-async def trending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def trending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send the top 5 trending coins."""
     await update.message.reply_text("⏳ *Fetching trending coins...*", parse_mode="Markdown")
     trending_coins = await get_trending_coins()
@@ -174,8 +150,8 @@ async def trending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # --- Main Application ---
 
-async def main() -> None:
-    """Start the bot."""
+def main():
+    """Start the bot - SYNC version to avoid event loop issues."""
     # Create the Application
     application = Application.builder().token(BOT_TOKEN).build()
 
@@ -187,11 +163,12 @@ async def main() -> None:
     application.add_handler(CommandHandler("trending", trending))
 
     # Clear any webhook
-    await application.bot.delete_webhook()
+    import asyncio
+    asyncio.run(application.bot.delete_webhook())
 
-    # Start polling
+    # Start the Bot using the sync method
     print("🤖 CryptoDaily Bot is starting...")
-    await application.run_polling()
+    application.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
