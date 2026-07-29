@@ -1,15 +1,17 @@
 import os
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Update, InputFile
 from telegram.ext import Application, CommandHandler, ContextTypes
 import aiohttp
 
 # Load environment variables
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("No BOT_TOKEN found. Please set it in Railway variables.")
 
 # Enable logging
 logging.basicConfig(
@@ -17,162 +19,158 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- Constants for Public Data Sources ---
-COINGECKO_API = "https://api.coingecko.com/api/v3"
-COINGECKO_PRICE = f"{COINGECKO_API}/simple/price"
-COINGECKO_TRENDING = f"{COINGECKO_API}/search/trending"
-BINANCE_API = "https://api.binance.com/api/v3"
-BINANCE_24H_TICKER = f"{BINANCE_API}/ticker/24hr"
+# ============================================================
+# ✏️ CONFIGURATION - EDIT THESE AS NEEDED
+# ============================================================
 
-# --- Helper Functions ---
+# The welcome message you provided
+WELCOME_TEXT = (
+    "✅We offer a 4% yield, with a USDT exchange rate of 109. "
+    "We sell very quickly, so please click the link below to join. 🪙\n\n"
+    "📥App registration address:\n"
+    "https://app-web.smartwallet-app.com/regist?code=0smartwalp90\n\n"
+    "✔️Official channel link ⚡️\n"
+    "https://t.me/smartwaleetofficial\n\n"
+    "✉️Contact me🔠🔠 : @Alexa768"
+)
 
-async def get_bitcoin_price():
-    """Fetch current BTC price in USD from CoinGecko."""
-    params = {"ids": "bitcoin", "vs_currencies": "usd"}
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(COINGECKO_PRICE, params=params) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return data.get("bitcoin", {}).get("usd", "N/A")
-                return None
-        except Exception as e:
-            logger.error(f"Price request failed: {e}")
-            return None
+# The image file name (must be in the same GitHub repository)
+WELCOME_IMAGE = "cry.png"  # This matches your uploaded image
 
-async def get_trending_coins():
-    """Get top trending coins from CoinGecko."""
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(COINGECKO_TRENDING) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    coins = data.get("coins", [])[:5]
-                    names = [coin["item"]["name"] for coin in coins]
-                    return ", ".join(names) if names else "Bitcoin, Ethereum, Solana"
-                return "Bitcoin, Ethereum, Solana"
-        except Exception:
-            return "Bitcoin, Ethereum, Solana"
+# Reminder interval in seconds (2 hours = 7200 seconds)
+REMINDER_INTERVAL = 7200  # 2 hours
 
-async def get_market_update():
-    """Get a market summary from Binance public API."""
-    params = {"symbol": "BTCUSDT"}
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(BINANCE_24H_TICKER, params=params) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    price = float(data.get("lastPrice", 0))
-                    change = float(data.get("priceChangePercent", 0))
-                    return f"💰 *BTC/USDT*: ${price:,.2f} (24h: {change:+.2f}%)"
-                return "💰 BTC/USDT: Market data currently unavailable."
-        except Exception:
-            return "💰 BTC/USDT: Market data currently unavailable."
-
-async def get_top_news():
-    """Get a daily news digest."""
-    trending = await get_trending_coins()
-    news_items = [
-        f"📰 *Today's Crypto Highlights*",
-        f"🚀 *Trending Coins*: {trending}",
-        f"💡 *Did you know?* Bitcoin's whitepaper was published on October 31, 2008.",
-        f"📅 *Today's Date*: {datetime.now().strftime('%B %d, %Y')}",
-    ]
-    return "\n".join(news_items)
-
-# --- Bot Command Handlers ---
+# ============================================================
+# BOT COMMAND HANDLERS
+# ============================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send a welcome message when /start is issued."""
+    """Send the welcome image and message when /start is issued."""
     user = update.effective_user
-    welcome_text = (
-        f"Hello {user.first_name}! 👋\n\n"
-        "I am *CryptoDaily*, your daily crypto briefing bot.\n"
-        "I provide a simple, non-financial summary of the crypto world.\n\n"
-        "📋 *Available Commands:*\n"
-        "/start - Show this welcome message\n"
-        "/help - Show available commands\n"
-        "/daily - Get today's crypto news and price digest\n"
-        "/price - Get current BTC price\n"
-        "/trending - See what's trending on CoinGecko\n\n"
-        "⚠️ *Disclaimer*: I am an educational bot. I do not give financial advice."
-    )
-    await update.message.reply_text(welcome_text, parse_mode="Markdown")
+    logger.info(f"User {user.first_name} ({user.id}) started the bot.")
+
+    # Send the image first
+    try:
+        with open(WELCOME_IMAGE, 'rb') as photo:
+            await update.message.reply_photo(
+                photo=InputFile(photo),
+                caption=WELCOME_TEXT,
+                parse_mode="HTML"
+            )
+    except FileNotFoundError:
+        # If image is missing, send just the text
+        logger.warning(f"Image file '{WELCOME_IMAGE}' not found. Sending text only.")
+        await update.message.reply_text(WELCOME_TEXT)
+
+    # Add user to reminder list if not already present
+    if 'users_to_remind' not in context.bot_data:
+        context.bot_data['users_to_remind'] = set()
+    context.bot_data['users_to_remind'].add(update.effective_user.id)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a help message."""
     help_text = (
-        "🤖 *CryptoDaily Bot Help*\n\n"
-        "/start - Show the welcome message\n"
+        "🤖 *Bot Commands*\n\n"
+        "/start - Show the welcome message and image\n"
         "/help - Show this help menu\n"
-        "/daily - Get a crypto news and price digest\n"
-        "/price - Get current Bitcoin price in USD\n"
-        "/trending - Show top 5 trending coins\n\n"
-        "📊 *Data Sources*:\n"
-        "CoinGecko & Binance Public APIs (No API keys required)\n\n"
-        "📌 *Note*: All data is for educational purposes only."
+        "/stop_reminders - Stop receiving 2-hour reminders\n"
+        "/resume_reminders - Resume receiving reminders\n"
+        "/status - Check your reminder status\n\n"
+        "⏰ Reminders are sent every 2 hours."
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
 
-async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send a daily digest of crypto news and prices."""
-    await update.message.reply_text("📊 *Generating your daily crypto digest...*", parse_mode="Markdown")
-    
-    btc_price = await get_bitcoin_price()
-    market_update = await get_market_update()
-    news = await get_top_news()
-    
-    digest = (
-        f"📆 *Crypto Daily Digest* - {datetime.now().strftime('%B %d, %Y')}\n\n"
-        f"🔹 {market_update}\n"
-        f"🔹 Current BTC Price: ${btc_price:,.2f} (if available)\n\n"
-        f"{news}\n\n"
-        f"✅ *Daily digest complete!*"
+async def stop_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Stop sending reminders to the user."""
+    user_id = update.effective_user.id
+    if 'users_to_remind' in context.bot_data:
+        context.bot_data['users_to_remind'].discard(user_id)
+        await update.message.reply_text("✅ You will no longer receive 2-hour reminders.")
+    else:
+        await update.message.reply_text("⚠️ You were not on the reminder list.")
+
+async def resume_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Resume sending reminders to the user."""
+    user_id = update.effective_user.id
+    if 'users_to_remind' not in context.bot_data:
+        context.bot_data['users_to_remind'] = set()
+    context.bot_data['users_to_remind'].add(user_id)
+    await update.message.reply_text("✅ You will now receive 2-hour reminders again.")
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Check if the user is on the reminder list."""
+    user_id = update.effective_user.id
+    if 'users_to_remind' in context.bot_data and user_id in context.bot_data['users_to_remind']:
+        await update.message.reply_text("⏰ You are currently receiving 2-hour reminders.")
+    else:
+        await update.message.reply_text("⏸️ You are not receiving reminders. Use /resume_reminders to start.")
+
+# ============================================================
+# REMINDER JOB (Runs every 2 hours)
+# ============================================================
+
+async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
+    """Send a reminder message to all users in the reminder list."""
+    if 'users_to_remind' not in context.bot_data:
+        return
+
+    reminder_text = (
+        "⏰ *2-Hour Reminder*\n\n"
+        "✅ We offer a 4% yield, with a USDT exchange rate of 109.\n\n"
+        "📥 Download the app:\n"
+        "https://app-web.smartwallet-app.com/regist?code=0smartwalp90\n\n"
+        "Join our official channel:\n"
+        "https://t.me/smartwaleetofficial"
     )
-    await update.message.reply_text(digest, parse_mode="Markdown")
 
-async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send the current BTC price."""
-    await update.message.reply_text("⏳ *Fetching current BTC price...*", parse_mode="Markdown")
-    btc_price = await get_bitcoin_price()
-    if btc_price and btc_price != "N/A":
-        await update.message.reply_text(f"💰 *Bitcoin (BTC) Price*: ${btc_price:,.2f} USD", parse_mode="Markdown")
-    else:
-        await update.message.reply_text("❌ Could not fetch BTC price at this time. Please try again later.")
+    users_to_remove = []
+    for user_id in context.bot_data['users_to_remind']:
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=reminder_text,
+                parse_mode="Markdown"
+            )
+            logger.info(f"Reminder sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send reminder to {user_id}: {e}")
+            users_to_remove.append(user_id)
 
-async def trending(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send the top 5 trending coins."""
-    await update.message.reply_text("⏳ *Fetching trending coins...*", parse_mode="Markdown")
-    trending_coins = await get_trending_coins()
-    if trending_coins:
-        await update.message.reply_text(f"🚀 *Top Trending Coins*:\n{trending_coins}", parse_mode="Markdown")
-    else:
-        await update.message.reply_text("❌ Could not fetch trending coins at this time.")
+    # Clean up users who blocked the bot
+    for user_id in users_to_remove:
+        context.bot_data['users_to_remind'].discard(user_id)
 
-# --- Main Application ---
+# ============================================================
+# MAIN APPLICATION
+# ============================================================
 
 def main():
-    """Start the bot using a clean event loop."""
-    # Create a new event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
+    """Start the bot."""
     # Create the Application
     application = Application.builder().token(BOT_TOKEN).build()
 
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("daily", daily))
-    application.add_handler(CommandHandler("price", price))
-    application.add_handler(CommandHandler("trending", trending))
+    application.add_handler(CommandHandler("stop_reminders", stop_reminders))
+    application.add_handler(CommandHandler("resume_reminders", resume_reminders))
+    application.add_handler(CommandHandler("status", status_command))
 
-    # Run the bot
-    print("🤖 CryptoDaily Bot is starting...")
-    try:
-        application.run_polling()
-    finally:
-        loop.close()
+    # Schedule the reminder job (every 2 hours)
+    job_queue = application.job_queue
+    if job_queue:
+        job_queue.run_repeating(
+            send_reminders,
+            interval=REMINDER_INTERVAL,
+            first=10  # First reminder after 10 seconds (for testing)
+        )
+        logger.info(f"Reminder job scheduled every {REMINDER_INTERVAL} seconds (2 hours).")
+    else:
+        logger.warning("Job queue not available. Reminders will not work.")
+
+    # Start the bot
+    print("🤖 Smart Wallet Bot is starting...")
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
